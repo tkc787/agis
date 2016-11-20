@@ -44,7 +44,7 @@ DELETE FROM  shopping_list_items WHERE user_id = $1;
 
 -- viewShoppingList START
 
-SELECT * FROM shopping_list_items WHERE user_id = $1;
+SELECT * FROM shopping_list_items JOIN items ON shopping_list_items.item_id = items.item_id WHERE user_id = $1;
 
 -- END
 
