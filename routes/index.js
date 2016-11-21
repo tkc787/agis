@@ -54,10 +54,10 @@ function escapeSpecialChars(jsonString) {
 				.replace(/&lt;/g, "<")
 				.replace(/&gt;/g, ">");
 }
-router.get('/getProductData/:code', bodyParser.text(),function(req, res) {
+router.get('/getProductData/:code',function(req, res) {
 	var qry_string = req.params.code;
 	var body = new Buffer( 0 );
-	var item_object;
+	var body = '';
 	// var options = {
 	// 	host: 'pod.opendatasoft.com',
 	// 	port: 80,
@@ -66,32 +66,31 @@ router.get('/getProductData/:code', bodyParser.text(),function(req, res) {
 		var options = {
 		host: 'api.walmartlabs.com',
 		port: 80,
-		path: '/v1/items?apiKey=f6k74h2b5w459nv9rhu4u3ca&upc=035000521019'
+		path: '/v1/items?apiKey=f6k74h2b5w459nv9rhu4u3ca&upc=' + qry_string
 	};
 	if(qry_string) {
 		http.get(options, function (response) {
-			response.setEncoding('utf8');
 			response.on("data", function(chunk) {
-			item_object = chunk.toString("utf8");
-
-			// res.status(200).send(item_object.brand_nm + " x1");
-			// return res.status(200).json({brand_name: item_object.brand_nm, owner_name: item_object.owner_nm, img: item_object.brand_img});
+			body += chunk.toString("utf8");
+			// res.status(200).send(body.brand_nm + " x1");
+			// return res.status(200).json({brand_name: body.brand_nm, owner_name: body.owner_nm, img: body.brand_img});
 			}).on("end", function (e) {
-				console.log("closing POD connection");
 				try {
-					item_object = JSON.parse(escapeSpecialChars(item_object));
+					body = JSON.parse(escapeSpecialChars(body));
 				} catch (error) {
-					item_object = JSON.parse(escapeSpecialChars(item_object));
-					// while(!item_object) {
-					// 	try {
-					// 		item_object = JSON.parse((item_object.toString().trim()));
-					// 	} catch (error) {
-					// 		console.log(error);
-					// 	}
-					// }	
-				}							
-				// console.log(item_object);
-				return res.status(200).send(item_object);
+					console.log(body.items);
+					body = JSON.parse(escapeSpecialChars(body));
+				}
+				console.log(body.items[0].itemId);
+				var data = 
+				{
+					item_brand: body.items[0].brandName,
+					item_name: body.items[0].name,
+					item_code: body.items[0].upc,
+					item_img: body.items[0].thumbnailImage,
+					item_category: body.items[0].categoryPath
+				};
+				return res.status(200).json(data);
 			});
 		}).on('error', function(e) {
 			console.log(e);
@@ -136,73 +135,65 @@ router.post('/addToInventory', function (req, res) {
 	var data = JSON.parse(req.body.data);
 	console.log(data);
 	// connect to our database 
-	var queries = ['UPDATE inventory_items SET item_qty = item_qty + $1 WHERE item_id = $2;', 'INSERT INTO items (item_name, item_brand, item_category, item_img, item_code) VALUES ($1,$2,$3,$4,$5) RETURNING item_id;', 'INSERT INTO inventory_items (item_id, user_id, item_qty) VALUES ($1,$2,$3);'];
-	var queryParams = [[data.item_qty, data.item_code], [data.item_name, data.item_brand, data.item_category, data.item_img, data.item_code], [null, data.user_id, data.item_qty]];
+	var queries = ['SELECT inventory_items.item_id FROM inventory_items JOIN items ON inventory_items.item_id = items.item_id WHERE item_name = $1 and item_brand = $2;', 'SELECT item_id FROM items WHERE item_name = $1 AND item_brand = $2;','INSERT INTO items (item_name, item_brand, item_category, item_img, item_code) VALUES ($1,$2,$3,$4,$5) RETURNING item_id;', 'INSERT INTO inventory_items (item_id, user_id, item_qty) VALUES ($1,$2,$3);'];
+	var queryParams = [[data.item_name, data.item_brand], [data.item_name, data.item_brand],[data.item_name, data.item_brand, data.item_category, data.item_img, data.item_code], [null, data.user_id, data.item_qty]];
 	process.nextTick(function () {
 		pool.connect(function(err, client, done) {
 			if(err) {
 				console.error('error fetching client from pool', err);
-				return res.status(404).json(nok);
-			}
-			client.query('BEGIN', function (err) {
-				// execute a query on our database 
-				client.query(queries[0], queryParams[0], function (err) {
-					if(err) {
-						rollback(client, done);
-						return res.status(404).json(nok);
-					}
-					client.query(queries[1], queryParams[1], function (err, result) {
-						if(err) {
-							rollback(client, done);
-							return res.status(404).json(nok);
-						}
-						queryParams[2][0] = result.rows[0].item_id;
-						console.log(queryParams[2]);
-						client.query(queries[2], queryParams[2], function (err) {
-							if(err) {
-								console.log(err);
-								rollback(client, done);
-								return res.status(404).json(nok);
-							}
-							client.query('COMMIT', done);
-							return res.status(200).json(ok);
-						});	
-					});				
-				});
-			});
-		});
-	});
-});
-
-router.post('/removeFromInventory', function (req, res) {
-	var data = JSON.parse(req.body.data);
-	// connect to our database 
-	var queries = ['UPDATE inventory_items SET item_qty = item_qty - $1 WHERE item_id = $2 AND user_id = $3 RETURNING item_qty;', 'INSERT INTO shopping_list_items (item_id, user_id) VALUES ($1,$2);'];
-	var queryParams = [[data.item_qty, data.item_id, data.user_id], [data.item_id, data.user_id]];
-	process.nextTick(function () {
-		pool.connect(function(err, client, done) {
-			if(err) {
-				return console.error('error fetching client from pool', err);
+				return res.status(400).json(nok);
 			}
 			client.query('BEGIN', function (err) {
 				// execute a query on our database 
 				client.query(queries[0], queryParams[0], function (err, result) {
 					if(err) {
-						console.log(err);
 						rollback(client, done);
-						return res.status(404).json(nok);
+						return res.status(400).json(nok);
 					}
-					if (result.rows[0].item_qty > 0) {
-						client.query('COMMIT', done);
-						return res.status(200).json({msg: "Succesful transaction"});
+					if(result.rows.length){
+						rollback(client, done);
+						return res.status(400).json({msg: "Item already exists in inventory"});
 					}
-					client.query(queries[1], queryParams[1], function (err) {
+					client.query(queries[1], queryParams[1], function (err, result1) {
 						if(err) {
 							rollback(client, done);
-							return res.status(404).json(nok);
+							return res.status(400).json(nok);
 						}
-						client.query('COMMIT', done);
-						return res.status(200).json({msg: "Succesful transaction"});
+						if(result1.rows.length){
+								client.query('INSERT INTO inventory_items (item_id, user_id, item_qty) SELECT item_id, $1 as user_id, $2 as item_qty FROM items WHERE item_name = $3 AND item_brand = $4;', [data.user_id, data.item_qty, data.item_name, data.item_brand], function (err) {
+									if(err) {
+										console.log("Entered query error");
+										console.log(err);
+										rollback(client, done);
+										return res.status(400).json(nok);										
+									}
+									console.log("Successfully entered 23505");
+									client.query('COMMIT', done);
+									return res.status(200).json(ok);
+								});							
+						}
+						else{
+							client.query(queries[2], queryParams[2], function (err, result2) {
+								if(err) {
+									console.log(err);
+									rollback(client, done);
+									return res.status(404).json(nok);
+								}
+								if(result2) {
+									queryParams[3][0] = result2.rows[0].item_id;
+									console.log(queryParams[3]);
+									client.query(queries[3], queryParams[3], function (err) {
+										if(err) {
+											console.log(err);
+											rollback(client, done);
+											return res.status(404).json(nok);
+										}
+										client.query('COMMIT', done);
+										return res.status(200).json(ok);
+									});	
+								}
+							});
+						}
 					});				
 				});
 			});
@@ -299,7 +290,7 @@ router.get('/viewInventory/:uid', function (req, res) {
 });
 
 router.post('/addToShoppingList', function (req, res) {
-	var user_data = JSON.parse(req.body.data);
+	var data = JSON.parse(req.body.data);
 	// connect to our database 
 	pool.connect(function(err, client, done) {
 	  if(err) {
@@ -307,7 +298,7 @@ router.post('/addToShoppingList', function (req, res) {
 	  }
 	 
 		// execute a query on our database 
-		client.query('INSERT INTO shopping_list_items (item_id, user_id) VALUES ($1, $2);', [data.item_id, data.user_id], function (err) {
+		client.query('INSERT INTO shopping_list_items (item_id, user_id) VALUES ($1, $2) RETURNING item_id;', [data.item_id, data.user_id], function (err, result) {
 
 			done();
 
@@ -316,22 +307,24 @@ router.post('/addToShoppingList', function (req, res) {
 			  res.status(404).json(nok);
 			}
 
-			res.status(200).json(result.rows);
+			res.status(200).json({item_id: result.rows[0].item_id});
 
 		});
 	});	
 });
 
 router.post('/removeFromShoppingList', function (req, res) {
-	var user_data = JSON.parse(req.body.data);
+	var data = JSON.parse(req.body.data);
+	console.log(data);
 	// connect to our database 
 	pool.connect(function(err, client, done) {
 	  if(err) {
 	    return console.error('error fetching client from pool', err);
+
 	  }
 	 
 		// execute a query on our database 
-		client.query('DELETE FROM shopping_list_items WHERE user_id = $1 AND item_id = $2;', [data.user_id, data.item_id], function (err) {
+		client.query('DELETE FROM shopping_list_items WHERE user_id = $1 AND item_id = $2;', [parseInt(data.user_id), data.item_id], function (err) {
 
 			done();
 
@@ -339,8 +332,8 @@ router.post('/removeFromShoppingList', function (req, res) {
 			  console.error('error running query', err);
 			  res.status(404).json(nok);
 			}
-
-			res.status(200).json(ok);
+			console.log("success");
+			return res.status(200).json(ok);
 
 		});
 	});	
@@ -408,31 +401,6 @@ function rollback(client, done) {
     return done(err);
   });
 };
-
-function doQuery(query, queryParams, cb) {
-	// connect to our database 
-	pool.connect(function(err, client, done) {
-	  if(err) {
-	    return console.error('error fetching client from pool', err);
-	  }
-	 
-	  // execute a query on our database 
-	  client.query('UPDATE inventory_items SET item_qty = item_qty + $1 WHERE item_code = $2;', [data.item_qty, data.item_code], function (err, result) {
-
-	  	done();
-
-	    if(err) {
-	      return console.error('error running query', err);
-	    }
-	 
-	    // just print the result to the console 
-	    console.log(result.rows[0]); // outputs: { name: 'brianc' } 
-	    if(cb) {
-		    cb();
-	    }	 
-	  });
-	});		
-}
 
 /*  */
 router.post('/post', function(req, res) {

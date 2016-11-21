@@ -68,7 +68,7 @@ DELETE FROM notifications WHERE user_id = $1;
 
 -- getUserList START
 
-SELECT * FROM users ORDER BY user_id DESC LIMIT 5;
+SELECT username FROM users ORDER BY user_id DESC LIMIT 5;
 
 -- END
  
