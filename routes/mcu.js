@@ -126,7 +126,7 @@ router.get('/addToInventory/:id/:barcode', bodyParser.text(), function (req, res
 	var user_id = req.params.id;
 	var item_code = req.params.barcode;
 	// connect to our database 
-	var queries = ['SELECT inventory_items.item_id FROM inventory_items JOIN items ON inventory_items.item_id = items.item_id WHERE items.item_code = $1 AND inventory_items.user_id = $2;', 'SELECT item_id FROM items WHERE item_code = $1;','INSERT INTO items (item_name, item_brand, item_category, item_img, item_code) VALUES ($1,$2,$3,$4,$5) RETURNING item_id, item_name;', 'INSERT INTO inventory_items (item_id, user_id, item_qty) VALUES ($1,$2,$3) RETURNING item_qty;'];
+	var queries = ['SELECT inventory_items.item_id FROM inventory_items JOIN items ON inventory_items.item_id = items.item_id WHERE items.item_code = $1 AND inventory_items.user_id = $2;', 'SELECT item_id, item_name FROM items WHERE item_code = $1;','INSERT INTO items (item_name, item_brand, item_category, item_img, item_code) VALUES ($1,$2,$3,$4,$5) RETURNING item_id, item_name;', 'INSERT INTO inventory_items (item_id, user_id, item_qty) VALUES ($1,$2,$3) RETURNING item_qty;'];
 	process.nextTick(function () {
 		pool.connect(function(err, client, done) {
 			if(err) {
@@ -170,7 +170,7 @@ router.get('/addToInventory/:id/:barcode', bodyParser.text(), function (req, res
 											return res.status(400).send(nok);										
 										}
 										client.query('COMMIT', done);
-										return res.status(200).send(ok);
+										return res.status(200).send(result1.rows[0].item_name.substring(0, 14) + " x1");
 									});							
 							}
 							else {
@@ -226,8 +226,8 @@ router.get('/removeFromInventory/:id/:barcode', bodyParser.text(), function (req
 	var item_id = req.params.barcode;
 	console.log(item_id);
 	// connect to our database 
-	var queries = ['UPDATE inventory_items SET item_qty = item_qty - 1 FROM items WHERE items.item_id = inventory_items.item_id AND items.item_code = $1 AND inventory_items.user_id = $2 RETURNING items.item_name as item_name, inventory_items.item_qty as item_qty;', 'INSERT INTO shopping_list_items (item_id, user_id) VALUES ($1,$2);'];
-	var queryParams = [[item_id, user_id], [item_id, user_id]];
+	var queries = ['UPDATE inventory_items SET item_qty = item_qty - 1 FROM items WHERE items.item_id = inventory_items.item_id AND items.item_code = $1 AND inventory_items.user_id = $2 RETURNING items.item_name as item_name, inventory_items.item_qty as item_qty;', 'INSERT INTO shopping_list_items (item_id, user_id) SELECT item_id, $1 as user_id FROM items WHERE item_code = $2 LIMIT 1;'];
+	var queryParams = [[item_id, user_id], [user_id, item_id]];
 	process.nextTick(function () {
 		pool.connect(function(err, client, done) {
 			if(err) {
@@ -241,23 +241,30 @@ router.get('/removeFromInventory/:id/:barcode', bodyParser.text(), function (req
 						rollback(client, done);
 						return res.status(404).send(nok);
 					}
-					if (update_result.rows[0].item_qty >= 0) {
-						client.query('COMMIT', done);
-						return res.status(200).send(update_result.rows[0].item_name.substring(0, 14) + " x" + update_result.rows[0].item_qty);
-					}
-					else {
-						if(update_result.rows[0].item_qty < 0) {
+					if(update_result.rows.length) {
+						if (update_result.rows[0].item_qty > 0) {
+							client.query('COMMIT', done);
+							return res.status(200).send(update_result.rows[0].item_name.substring(0, 14) + " x" + update_result.rows[0].item_qty);
+						}
+						else if(update_result.rows[0].item_qty == 0) {
+							client.query(queries[1], queryParams[1], function (err) {
+								if(err) {
+									console.log(err);
+									rollback(client, done);
+									return res.status(404).send(nok);
+								}
+								client.query('COMMIT', done);
+								return res.status(200).send(update_result.rows[0].item_name.substring(0, 14) + " x0");
+							});						
+						}
+						else {
 							rollback(client, done);
 							return res.status(200).send("404");							
-						}
-						client.query(queries[1], queryParams[1], function (err) {
-							if(err) {
-								rollback(client, done);
-								return res.status(404).send(nok);
-							}
-							client.query('COMMIT', done);
-							return res.status(200).send(ok);
-						});						
+						}						
+					}
+					else {
+						rollback(client, done);
+						return res.status(200).send("404");							
 					}			
 				});
 			});
